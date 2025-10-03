@@ -1,26 +1,54 @@
 function Decrypt-CPassword {
-    param([string]$cpassword)
+    param([Parameter(Mandatory=$true)][string]$cpassword)
 
-    # Microsoft által dokumentált 32-byte AES kulcs (MSDN / MS-GPPREF)
+    # normalise
+    $s = $cpassword.Trim()
+    # unescape XML/HTML entities if present (e.g. &amp;)
+    try { $s = [System.Net.WebUtility]::HtmlDecode($s) } catch { }
+
+    # keep only base64 alphabet chars (+ / = and alphanumerics)
+    $s = ($s.ToCharArray() | Where-Object { $_ -match '[A-Za-z0-9+/=]' }) -join ''
+
+    if ($s.Length -eq 0) { throw "After cleaning, no Base64 characters remain." }
+
+    # add padding if necessary
+    $mod = $s.Length % 4
+    if ($mod -eq 1) {
+        throw "Invalid Base64 length after cleaning (len mod 4 = 1). Likely truncated or corrupted."
+    } elseif ($mod -ne 0) {
+        $pad = 4 - $mod
+        $s = $s + ('=' * $pad)
+    }
+
+    # AES key from MS (fixed)
     $key = [byte[]](
       0x4e,0x99,0x06,0xe8,0xfc,0xb6,0x6c,0xc9,
       0xfa,0xf4,0x93,0x10,0x62,0x0f,0xfe,0xe8,
       0xf4,0x96,0xe8,0x06,0xcc,0x05,0x79,0x90,
       0x20,0x9b,0x09,0xa4,0x33,0xb6,0x6c,0x1b
     )
+    $iv = New-Object byte[] 16
 
-    $iv = New-Object byte[] 16  # null IV (16 x 0x00)
-    $cipher = [Convert]::FromBase64String($cpassword)
+    try {
+        $cipher = [Convert]::FromBase64String($s)
+    } catch {
+        throw "Base64 decode failed: $($_.Exception.Message)"
+    }
 
-    $aes = [System.Security.Cryptography.Aes]::Create()
-    $aes.Mode = 'CBC'
-    $aes.Padding = 'PKCS7'
-    $aes.KeySize = 256
-    $aes.BlockSize = 128
-    $aes.Key = $key
-    $aes.IV  = $iv
-
-    $decryptor = $aes.CreateDecryptor()
-    $plainBytes = $decryptor.TransformFinalBlock($cipher, 0, $cipher.Length)
-    [System.Text.Encoding]::Unicode.GetString($plainBytes)
+    try {
+        $aes = [System.Security.Cryptography.Aes]::Create()
+        $aes.Mode = 'CBC'
+        $aes.Padding = 'PKCS7'
+        $aes.KeySize = 256
+        $aes.BlockSize = 128
+        $aes.Key = $key
+        $aes.IV = $iv
+        $decryptor = $aes.CreateDecryptor()
+        $plainBytes = $decryptor.TransformFinalBlock($cipher, 0, $cipher.Length)
+        return [System.Text.Encoding]::Unicode.GetString($plainBytes)
+    } catch {
+        throw "AES decryption failed: $($_.Exception.Message)"
+    } finally {
+        if ($aes) { $aes.Dispose() }
+    }
 }

